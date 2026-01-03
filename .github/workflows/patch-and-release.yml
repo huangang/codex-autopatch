@@ -1,0 +1,257 @@
+name: Patch Codex Extension and Release
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Extension version to patch (leave empty for latest)'
+        required: false
+        default: ''
+      include_mini:
+        description: 'Also create mini variant'
+        required: false
+        default: 'true'
+        type: boolean
+
+  # 每天自动触发 (UTC 时间 2:00，北京时间 10:00)
+  schedule:
+    - cron: '0 2 * * *'
+
+env:
+  EXTENSION_PUBLISHER: openai
+  EXTENSION_NAME: chatgpt
+
+jobs:
+  fetch-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      should_release: ${{ steps.check_release.outputs.should_release }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest extension version
+        id: get_version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # 从 VS Code Marketplace API 获取最新版本
+            RESPONSE=$(curl -s "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json;api-version=6.0-preview.1" \
+              -d '{
+                "filters": [{
+                  "criteria": [
+                    {"filterType": 7, "value": "openai.chatgpt"}
+                  ]
+                }],
+                "flags": 914
+              }')
+            VERSION=$(echo "$RESPONSE" | jq -r '.results[0].extensions[0].versions[0].version')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION"
+
+      - name: Check if release already exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          # 检查是否已存在该版本的 release
+          if gh release view "v${VERSION}" &>/dev/null; then
+            echo "Release v${VERSION} already exists, skipping..."
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Release v${VERSION} does not exist, will create..."
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+  patch-and-package:
+    needs: fetch-version
+    if: needs.fetch-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - win32-x64
+          - win32-arm64
+          - linux-x64
+          - linux-arm64
+          - darwin-x64
+          - darwin-arm64
+          - alpine-x64
+          - alpine-arm64
+        variant:
+          - name: standard
+            include_mini: false
+          - name: with-mini
+            include_mini: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download extension for ${{ matrix.platform }}
+        id: download
+        run: |
+          VERSION="${{ needs.fetch-version.outputs.version }}"
+          PLATFORM="${{ matrix.platform }}"
+          FILENAME="${{ env.EXTENSION_PUBLISHER }}.${{ env.EXTENSION_NAME }}-${VERSION}-${PLATFORM}.vsix"
+          
+          # VS Code Marketplace 下载 URL
+          DOWNLOAD_URL="https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${{ env.EXTENSION_PUBLISHER }}/vsextensions/${{ env.EXTENSION_NAME }}/${VERSION}/vspackage?targetPlatform=${PLATFORM}"
+          
+          echo "Downloading from: $DOWNLOAD_URL"
+          
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o "$FILENAME" "$DOWNLOAD_URL")
+          
+          if [ "$HTTP_CODE" != "200" ] || [ ! -s "$FILENAME" ]; then
+            echo "Failed to download $PLATFORM (HTTP $HTTP_CODE), skipping..."
+            echo "available=false" >> $GITHUB_OUTPUT
+          else
+            echo "Downloaded: $FILENAME ($(stat -c%s "$FILENAME") bytes)"
+            echo "available=true" >> $GITHUB_OUTPUT
+            echo "filename=$FILENAME" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract and patch extension
+        if: steps.download.outputs.available == 'true'
+        run: |
+          VERSION="${{ needs.fetch-version.outputs.version }}"
+          PLATFORM="${{ matrix.platform }}"
+          VARIANT="${{ matrix.variant.name }}"
+          INCLUDE_MINI="${{ matrix.variant.include_mini }}"
+          FILENAME="${{ steps.download.outputs.filename }}"
+          
+          # 创建工作目录
+          WORK_DIR="patched-${PLATFORM}-${VARIANT}"
+          mkdir -p "$WORK_DIR"
+          
+          # 解压 vsix (它实际上是个 zip)
+          unzip -q "$FILENAME" -d "$WORK_DIR"
+          
+          # 找到 index-*.js 文件
+          INDEX_FILES=$(find "$WORK_DIR" -path "*/webview/assets/index-*.js" -type f)
+          
+          if [ -z "$INDEX_FILES" ]; then
+            echo "No index-*.js files found!"
+            exit 1
+          fi
+          
+          echo "Found index files:"
+          echo "$INDEX_FILES"
+          
+          # 运行 patch 脚本
+          if [ "$INCLUDE_MINI" = "true" ]; then
+            python patch_models.py --include-mini $INDEX_FILES
+          else
+            python patch_models.py $INDEX_FILES
+          fi
+          
+          # 保存工作目录名
+          echo "WORK_DIR=$WORK_DIR" >> $GITHUB_ENV
+
+      - name: Repackage extension
+        if: steps.download.outputs.available == 'true'
+        run: |
+          VERSION="${{ needs.fetch-version.outputs.version }}"
+          PLATFORM="${{ matrix.platform }}"
+          VARIANT="${{ matrix.variant.name }}"
+          
+          OUTPUT_NAME="${{ env.EXTENSION_PUBLISHER }}.${{ env.EXTENSION_NAME }}-${VERSION}-${PLATFORM}-patched-${VARIANT}.vsix"
+          
+          cd "$WORK_DIR"
+          # 重新打包为 vsix
+          zip -rq "../$OUTPUT_NAME" . -x "*.bak"
+          cd ..
+          
+          echo "Created: $OUTPUT_NAME ($(stat -c%s "$OUTPUT_NAME") bytes)"
+          echo "OUTPUT_NAME=$OUTPUT_NAME" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        if: steps.download.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-${{ matrix.platform }}-${{ matrix.variant.name }}
+          path: ${{ env.OUTPUT_NAME }}
+          retention-days: 1
+
+  create-release:
+    needs: [fetch-version, patch-and-package]
+    if: needs.fetch-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: patched-*
+          merge-multiple: true
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -name "*.vsix" | sort
+          ls -la artifacts/ || true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.fetch-version.outputs.version }}"
+          
+          # 生成 release notes
+          cat > release_notes.md << 'EOF'
+          ## Patched VS Code Codex Extension v${{ needs.fetch-version.outputs.version }}
+          
+          This release contains patched versions of the `openai.chatgpt` VS Code extension.
+          
+          ### Changes
+          - Added all codex models to apikey authentication
+          - Removed codex models from CHAT_GPT_AUTH_ONLY_MODELS restriction
+          
+          ### Variants
+          - **standard**: Excludes `-mini` models from the model list
+          - **with-mini**: Includes all models including `-mini` variants
+          
+          ### Installation
+          1. Download the `.vsix` file for your platform
+          2. In VS Code: `Extensions` → `...` → `Install from VSIX...`
+          3. Restart VS Code
+          
+          ### Supported Platforms
+          - Windows x64 / ARM64
+          - Linux x64 / ARM64
+          - macOS x64 (Intel) / ARM64 (Apple Silicon)
+          - Alpine x64 / ARM64
+          EOF
+          
+          # 创建 release
+          gh release create "v${VERSION}" \
+            --title "Patched Codex Extension v${VERSION}" \
+            --notes-file release_notes.md \
+            artifacts/*.vsix
+
+      - name: Summary
+        run: |
+          echo "## Release Created Successfully! :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v${{ needs.fetch-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Uploaded Files:" >> $GITHUB_STEP_SUMMARY
+          for f in artifacts/*.vsix; do
+            echo "- $(basename $f)" >> $GITHUB_STEP_SUMMARY
+          done
