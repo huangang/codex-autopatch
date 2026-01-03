@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 r"""
-自动为 VS Code Codex 扩展的 webview bundle 注入最新 + 上一版 codex-max 模型，
-并移除 CHAT_GPT_AUTH_ONLY_MODELS 对 codex 系列的限制，确保 apikey 也能选择。
+自动为 VS Code Codex 扩展的 webview bundle 注入模型列表，解除各种限制：
+- 修补 MODEL_ORDER_BY_AUTH_METHOD.apikey 列表
+- 修补 API_KEY_MODELS 集合（控制 apikey 用户可见的模型）
+- 修补 AVAILABLE_MODELS 集合（防止模型被强制升级）
+- 移除 CHAT_GPT_AUTH_ONLY_MODELS 对 codex 系列的限制
 
 特性：
 - 自动发现（--auto）插件目录：
@@ -146,6 +149,65 @@ def remove_auth_only(text: str) -> Tuple[str, bool]:
     return new_text, True
 
 
+def patch_api_key_models(text: str, include_mini: bool = False) -> Tuple[str, bool]:
+    """Patch API_KEY_MODELS to include all gpt-5* models for apikey users.
+    
+    API_KEY_MODELS controls which models are visible in the dropdown for apikey auth.
+    """
+    m = re.search(r"API_KEY_MODELS=new Set\(\[([^\]]*?)\]\)", text)
+    if not m:
+        return text, False
+    
+    # Build the new model list from all gpt-5* models found in the file
+    gpt5_models = find_gpt5_models(text)
+    if not include_mini:
+        gpt5_models = [m for m in gpt5_models if "mini" not in m.lower()]
+    
+    # Filter to only include real model names (not partial matches)
+    valid_models = [m for m in gpt5_models if re.match(r"^gpt-5(\.[0-9]+)?(-codex)?(-max|-mini)?$", m)]
+    if not valid_models:
+        valid_models = ["gpt-5.1-codex-max", "gpt-5.2", "gpt-5.1-codex", "gpt-5.1", "gpt-5-codex", "gpt-5"]
+        if include_mini:
+            valid_models.extend(["gpt-5.1-codex-mini", "gpt-5-codex-mini"])
+    
+    new_list = order_models(valid_models)
+    replacement = "API_KEY_MODELS=new Set([" + ",".join(new_list) + "])"
+    new_text = text[: m.start()] + replacement + text[m.end() :]
+    return new_text, True
+
+
+def patch_available_models(text: str, include_mini: bool = False) -> Tuple[str, bool]:
+    """Patch AVAILABLE_MODELS to include all gpt-5* models.
+    
+    AVAILABLE_MODELS controls whether a model is considered "available".
+    Models not in this set will be forcibly upgraded to newer versions.
+    """
+    m = re.search(r"AVAILABLE_MODELS=new Set\(\[([^\]]*?)\]\)", text)
+    if not m:
+        return text, False
+    
+    # Build the new model list from all gpt-5* models found in the file
+    gpt5_models = find_gpt5_models(text)
+    if not include_mini:
+        gpt5_models = [m for m in gpt5_models if "mini" not in m.lower()]
+    
+    # Filter to only include real model names (not partial matches)
+    valid_models = [m for m in gpt5_models if re.match(r"^gpt-5(\.[0-9]+)?(-codex)?(-max|-mini)?$", m)]
+    if not valid_models:
+        valid_models = ["gpt-5.2-codex", "gpt-5.2", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1", "gpt-5-codex", "gpt-5"]
+        if include_mini:
+            valid_models.extend(["gpt-5.1-codex-mini", "gpt-5-codex-mini"])
+    
+    # Always include codex-auto
+    all_models = ["codex-auto"] + [_quote(m) for m in sorted(set(_normalize_name(m) for m in valid_models), key=_model_sort_key)]
+    # Remove duplicate quotes for codex-auto
+    all_models[0] = '"codex-auto"'
+    
+    replacement = "AVAILABLE_MODELS=new Set([" + ",".join(all_models) + "])"
+    new_text = text[: m.start()] + replacement + text[m.end() :]
+    return new_text, True
+
+
 def patch_file(path: Path, include_mini: bool = False) -> None:
     bak = path.with_suffix(path.suffix + ".bak")
     if not bak.exists():
@@ -155,10 +217,22 @@ def patch_file(path: Path, include_mini: bool = False) -> None:
     original = path.read_text()
     text, changed_apikey = ensure_apikey(original, include_mini=include_mini)
     text, changed_auth = remove_auth_only(text)
+    text, changed_api_key_models = patch_api_key_models(text, include_mini=include_mini)
+    text, changed_available_models = patch_available_models(text, include_mini=include_mini)
 
-    if changed_apikey or changed_auth:
+    any_changed = changed_apikey or changed_auth or changed_api_key_models or changed_available_models
+    if any_changed:
         path.write_text(text)
-        print(f"[patched] {path}")
+        changes = []
+        if changed_apikey:
+            changes.append("apikey list")
+        if changed_auth:
+            changes.append("auth_only")
+        if changed_api_key_models:
+            changes.append("API_KEY_MODELS")
+        if changed_available_models:
+            changes.append("AVAILABLE_MODELS")
+        print(f"[patched] {path} ({', '.join(changes)})")
     else:
         print(f"[skip]    {path} (already compliant)")
 

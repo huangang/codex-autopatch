@@ -243,14 +243,6 @@ jobs:
           
           # 生成 release notes
           cat > release_notes.md << 'EOF'
-          ## Patched VS Code Codex Extension v${{ needs.fetch-version.outputs.version }}
-          
-          This release contains patched versions of the `openai.chatgpt` VS Code extension.
-          
-          ### Changes
-          - Added all codex models to apikey authentication
-          - Removed codex models from CHAT_GPT_AUTH_ONLY_MODELS restriction
-          
           ### Variants
           - **standard**: Excludes `-mini` models from the model list
           - **with-mini**: Includes all models including `-mini` variants
@@ -269,7 +261,7 @@ jobs:
           
           # 创建 release
           gh release create "v${VERSION}" \
-            --title "Patched Codex Extension v${VERSION}" \
+            --title "Codex VSCode Patched v${VERSION}" \
             --notes-file release_notes.md \
             artifacts/*.vsix
 
