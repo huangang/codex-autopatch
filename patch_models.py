@@ -118,22 +118,32 @@ def build_apikey_list(text: str, include_mini: bool = False) -> List[str]:
 
 def replace_auth_method_array(text: str, field: str, new_items: List[str]) -> Tuple[str, bool]:
     """Replace array content for a specific field in MODEL_ORDER_BY_AUTH_METHOD.
-    
-    Handles both single-line and multi-line array formats, including spread operators.
+
+    Handles both single-line and multi-line array formats, including spread operators,
+    as well as variable references like `apikey:DEFAULT_MODEL_ORDER`.
     """
     new_array = "[" + ",".join(new_items) + "]"
     new_field = f"{field}:{new_array}"
-    
+
     # 匹配 field: [ ... ] 形式，可能跨多行，可能包含展开运算符 ...
     # 使用 re.DOTALL 让 . 匹配换行符
-    pattern = re.compile(
+    pattern_array = re.compile(
         rf'{field}:\s*\[[^\]]*\]',
         re.DOTALL
     )
-    
-    if pattern.search(text):
-        return pattern.sub(new_field, text, count=1), True
-    
+
+    if pattern_array.search(text):
+        return pattern_array.sub(new_field, text, count=1), True
+
+    # 匹配 field:VARIABLE_NAME 形式（变量引用，如 apikey:DEFAULT_MODEL_ORDER）
+    # 变量名由大写字母、数字和下划线组成
+    pattern_var = re.compile(
+        rf'{field}:[A-Z][A-Z0-9_]*'
+    )
+
+    if pattern_var.search(text):
+        return pattern_var.sub(new_field, text, count=1), True
+
     return text, False
 
 
