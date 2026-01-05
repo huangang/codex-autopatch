@@ -1,6 +1,6 @@
 # Codex webview model patchers
 
-English: `README.md` | 中文: `README.zh.md`
+English: [`README.md`](README.md) | 中文: [`README.zh.md`](README.zh.md)
 
 这个仓库提供 Python、Node.js 和 Go 版本的脚本，用于 patch VS Code Codex 插件的 webview bundle。
 

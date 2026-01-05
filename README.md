@@ -1,6 +1,6 @@
 # Codex webview model patchers
 
-English: `README.md` | 中文: `README.zh.md`
+English: [`README.md`](README.md) | 中文: [`README.zh.md`](README.zh.md)
 
 This repo provides Python, Node.js, and Go scripts to patch the VS Code Codex webview bundle.
 
