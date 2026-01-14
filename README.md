@@ -18,13 +18,13 @@ Run directly via curl:
 
 ```bash
 # Auto-patch (recommended)
-curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash
 
 # Include mini models
-curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --include-mini
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash -s -- --include-mini
 
 # Restore from backup
-curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --restore
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash -s -- --restore
 ```
 
 ### Shell

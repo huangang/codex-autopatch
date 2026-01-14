@@ -18,13 +18,13 @@ English: [`README.md`](README.md) | 中文: [`README.zh.md`](README.zh.md)
 
 ```bash
 # 自动发现并 patch（推荐）
-curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash
 
 # 包含 mini 模型
-curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --include-mini
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash -s -- --include-mini
 
 # 从备份恢复
-curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --restore
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash -s -- --restore
 ```
 
 ### Shell

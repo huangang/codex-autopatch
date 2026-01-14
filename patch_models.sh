@@ -6,8 +6,8 @@
 #
 # 用法示例：
 #   # 通过 curl 直接执行（无需下载）
-#   curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash
-#   curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --include-mini
+#   curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash
+#   curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash -s -- --include-mini
 #
 #   # 本地执行
 #   ./patch_models.sh                          # 自动发现并 patch
@@ -76,10 +76,10 @@ show_help() {
 
 示例:
   # 通过 curl 直接执行（推荐）
-  curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash
+  curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash
 
   # 包含 mini 模型
-  curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --include-mini
+  curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/refs/heads/main/patch_models.sh | bash -s -- --include-mini
 
   # 本地执行
   ./patch_models.sh                          # 自动发现并 patch
