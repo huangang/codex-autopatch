@@ -2,7 +2,7 @@
 
 English: [`README.md`](README.md) | 中文: [`README.zh.md`](README.zh.md)
 
-This repo provides Python, Node.js, and Go scripts to patch the VS Code Codex webview bundle.
+This repo provides Shell, Python, Node.js, and Go scripts to patch the VS Code Codex webview bundle.
 
 ## What it does
 
@@ -12,7 +12,31 @@ This repo provides Python, Node.js, and Go scripts to patch the VS Code Codex we
 
 ## Usage
 
-Python:
+### Quick Start (no download required)
+
+Run directly via curl:
+
+```bash
+# Auto-patch (recommended)
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash
+
+# Include mini models
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --include-mini
+
+# Restore from backup
+curl -sL https://raw.githubusercontent.com/huangang/codex-autopatch/main/patch_models.sh | bash -s -- --restore
+```
+
+### Shell
+
+```bash
+./patch_models.sh                          # Auto-discover and patch
+./patch_models.sh --include-mini           # Include -mini models
+./patch_models.sh /path/to/index-foo.js    # Patch specific file
+./patch_models.sh --restore                # Restore from .bak backup
+```
+
+### Python
 
 ```
 python3 patch_models.py --auto
@@ -22,7 +46,7 @@ python3 patch_models.py --restore
 python3 patch_models.py --restore /path/to/index-foo.js.bak
 ```
 
-Node.js:
+### Node.js
 
 ```
 node patch_models.js --auto
@@ -32,7 +56,7 @@ node patch_models.js --restore
 node patch_models.js --restore /path/to/index-foo.js.bak
 ```
 
-Go:
+### Go
 
 ```
 go run patch_models.go --auto
