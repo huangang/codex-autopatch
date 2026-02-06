@@ -227,12 +227,13 @@ func replaceAuthMethodArray(text, field string, newItems []string) (string, bool
 	newArray := fmt.Sprintf("[%s]", strings.Join(newItems, ","))
 	newField := fmt.Sprintf("%s:%s", field, newArray)
 
-	patternArray := regexp.MustCompile(field + `:\s*\[[^\]]*\]`)
+	// 兼容 key 被引号包裹：apikey:[] / "apikey":[] / 'apikey':[]
+	patternArray := regexp.MustCompile(`(?:` + field + `|"` + field + `"|'` + field + `'):\s*\[[^\]]*\]`)
 	if patternArray.MatchString(text) {
 		return patternArray.ReplaceAllString(text, newField), true
 	}
 
-	patternVar := regexp.MustCompile(field + `:[A-Z][A-Z0-9_]*`)
+	patternVar := regexp.MustCompile(`(?:` + field + `|"` + field + `"|'` + field + `'):[A-Z][A-Z0-9_]*`)
 	if patternVar.MatchString(text) {
 		return patternVar.ReplaceAllString(text, newField), true
 	}
@@ -253,11 +254,62 @@ func ensureChatgpt(text string, includeMini bool) (string, bool) {
 func replaceModelSets(text string, includeMini bool) (string, bool) {
 	newList := buildApikeyList(text, includeMini)
 	newArray := "[" + strings.Join(newList, ",") + "]"
-	pattern := regexp.MustCompile(`new Set\(\["gpt-5[^\]]*\]\)`)
+	// 旧实现要求 Set 的第一个元素必须是 "gpt-5..."。
+	// 新版本 bundle 里可能不是以 gpt-5 开头，且可能使用单引号。
+	pattern := regexp.MustCompile(`new Set\(\[[^\]]*gpt-5[^\]]*\]\)`)
 	if !pattern.MatchString(text) {
 		return text, false
 	}
 	return pattern.ReplaceAllString(text, "new Set("+newArray+")"), true
+}
+
+func ensureModelInListModelsResponse(text string, model string) (string, bool) {
+	// Already injects.
+	if strings.Contains(text, "v.model===\""+model+"\"") || strings.Contains(text, "v.model==\""+model+"\"") {
+		return text, false
+	}
+
+	// Upgrade existing injection target.
+	patternFind := regexp.MustCompile(`models\.find\(v=>v\.model===(["'])gpt-5\.2-codex\1\)\|\|`)
+	patternUnshift := regexp.MustCompile(`models\.unshift\(\{model:(["'])gpt-5\.2-codex\1`)
+	upgraded := patternFind.ReplaceAllString(text, "models.find(v=>v.model===$1"+model+"$1)||")
+	upgraded = patternUnshift.ReplaceAllString(upgraded, "models.unshift({model:$1"+model+"$1")
+	if upgraded != text {
+		return upgraded, true
+	}
+
+	ident := `[_$A-Za-z][\w$]*`
+	pattern := regexp.MustCompile(`(?s)(` +
+		`(?P<obj>` + ident + `)=\{models:\[\]\};let ` +
+		`(?P<def>` + ident + `)=null;return ` +
+		`(?P<data>` + ident + `)\.forEach\(.*?\),` +
+		`\{modelsByType:(?P=obj),defaultModel:(?P=def)\}` +
+		`)`)
+
+	loc := pattern.FindStringSubmatchIndex(text)
+	if loc == nil {
+		return text, false
+	}
+	matches := pattern.FindStringSubmatch(text)
+	if matches == nil {
+		return text, false
+	}
+	objIdx := pattern.SubexpIndex("obj")
+	defIdx := pattern.SubexpIndex("def")
+	if objIdx < 0 || defIdx < 0 {
+		return text, false
+	}
+	obj := matches[objIdx]
+	defModel := matches[defIdx]
+
+	tail := "),{modelsByType:" + obj + ",defaultModel:" + defModel + "}"
+	repl := ")," + obj + `.models.find(v=>v.model===\"` + model + `\")||` + obj + `.models.unshift({model:\"` + model + `\",supportedReasoningEfforts:[{reasoningEffort:\"xhigh\",description:\"xhigh effort\"}]})` + ",{modelsByType:" + obj + ",defaultModel:" + defModel + "}"
+	matched := text[loc[0]:loc[1]]
+	if !strings.Contains(matched, tail) {
+		return text, false
+	}
+	patched := strings.Replace(matched, tail, repl, 1)
+	return text[:loc[0]] + patched + text[loc[1]:], true
 }
 
 func removeAuthOnly(text string) (string, bool) {
@@ -291,13 +343,15 @@ func patchFile(filePath string, includeMini bool) {
 	changedChatgpt := false
 	changedAuth := false
 	changedSets := false
+	changedListModels := false
 
 	text, changedApikey = ensureApikey(text, includeMini)
 	text, changedChatgpt = ensureChatgpt(text, includeMini)
 	text, changedAuth = removeAuthOnly(text)
 	text, changedSets = replaceModelSets(text, includeMini)
+	text, changedListModels = ensureModelInListModelsResponse(text, "gpt-5.3-codex")
 
-	if changedApikey || changedChatgpt || changedAuth || changedSets {
+	if changedApikey || changedChatgpt || changedAuth || changedSets || changedListModels {
 		if err := os.WriteFile(filePath, []byte(text), 0o644); err != nil {
 			fmt.Printf("[error]   %s\n", err.Error())
 			return
@@ -314,6 +368,9 @@ func patchFile(filePath string, includeMini bool) {
 		}
 		if changedSets {
 			changes = append(changes, "model_sets")
+		}
+		if changedListModels {
+			changes = append(changes, "list_models")
 		}
 		fmt.Printf("[patched] %s (%s)\n", filePath, strings.Join(changes, ", "))
 	} else {

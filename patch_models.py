@@ -129,14 +129,17 @@ def replace_auth_method_array(
 
     # 匹配 field: [ ... ] 形式，可能跨多行，可能包含展开运算符 ...
     # 使用 re.DOTALL 让 . 匹配换行符
-    pattern_array = re.compile(rf"{field}:\s*\[[^\]]*\]", re.DOTALL)
+    # 兼容 key 被引号包裹的情况：apikey:[] / "apikey":[] / 'apikey':[]
+    pattern_array = re.compile(
+        rf"(?:{field}|\"{field}\"|'{field}'):\s*\[[^\]]*\]", re.DOTALL
+    )
 
     if pattern_array.search(text):
         return pattern_array.sub(new_field, text, count=1), True
 
     # 匹配 field:VARIABLE_NAME 形式（变量引用，如 apikey:DEFAULT_MODEL_ORDER）
     # 变量名由大写字母、数字和下划线组成
-    pattern_var = re.compile(rf"{field}:[A-Z][A-Z0-9_]*")
+    pattern_var = re.compile(rf"(?:{field}|\"{field}\"|'{field}'):[A-Z][A-Z0-9_]*")
 
     if pattern_var.search(text):
         return pattern_var.sub(new_field, text, count=1), True
@@ -160,10 +163,86 @@ def replace_model_sets(text: str, include_mini: bool = False) -> Tuple[str, bool
     """Replace all new Set([...]) containing gpt-5 models with updated list."""
     new_list = build_apikey_list(text, include_mini=include_mini)
     new_array = "[" + ",".join(new_list) + "]"
-    pattern = re.compile(r'new Set\(\["gpt-5[^\]]*\]\)')
+    # 旧实现要求 Set 的第一个元素必须是 "gpt-5..."。
+    # 新版本 bundle 里可能不是以 gpt-5 开头，且可能使用单引号。
+    pattern = re.compile(r"new Set\(\[[^\]]*gpt-5[^\]]*\]\)")
     if not pattern.search(text):
         return text, False
     return pattern.sub(f"new Set({new_array})", text), True
+
+
+def ensure_model_in_list_models_response(text: str, model: str) -> Tuple[str, bool]:
+    """Ensure `model/list` results include a specific model.
+
+    Some Codex webview bundles build the dropdown from the app-server `model/list`
+    response, filtering the returned list. If the server doesn't return
+    `gpt-5.3-codex` yet, the model won't show even if allow-lists include it.
+
+    Newer bundles already inject the model if missing. Older bundles don't; we
+    patch the transformation function by inserting a comma-expression before the
+    final `{modelsByType:..., defaultModel:...}` return.
+    """
+
+    # If a bundle already injects the model, don't add another injection.
+    if f'v.model==="{model}"' in text or f'v.model=="{model}"' in text:
+        return text, False
+
+    # If it injects an older target (commonly gpt-5.2-codex), upgrade it.
+    upgraded, changed_upgrade = _upgrade_injected_model(text, model)
+    if changed_upgrade:
+        return upgraded, True
+
+    # Match the minified transformer pattern:
+    #   X={models:[]};let Y=null;return Z.forEach(...),{modelsByType:X,defaultModel:Y}
+    # 注意：这里不要用 \{ / \}，避免 f-string 的花括号转义坑；
+    # 且 regex 中 `{` 在不跟数字时会按字面量处理。
+    ident = r"[_$A-Za-z][\w$]*"
+    pattern = re.compile(
+        rf"(?P<obj>{ident})={{models:\[\]}};let "
+        rf"(?P<def>{ident})=null;return "
+        rf"(?P<data>{ident})\.forEach\(.*?\),"
+        rf"{{modelsByType:(?P=obj),defaultModel:(?P=def)}}",
+        re.DOTALL,
+    )
+
+    def repl(m: re.Match[str]) -> str:
+        obj = m.group("obj")
+        defm = m.group("def")
+        matched = m.group(0)
+        tail = f"),{{modelsByType:{obj},defaultModel:{defm}}}"
+        if tail not in matched:
+            return matched
+        inject = (
+            f"),{obj}.models.find(v=>v.model===\"{model}\")||"
+            f"{obj}.models.unshift({{model:\"{model}\",supportedReasoningEfforts:["
+            f"{{reasoningEffort:\"xhigh\",description:\"xhigh effort\"}}]}}),"
+            f"{{modelsByType:{obj},defaultModel:{defm}}}"
+        )
+        return matched.replace(tail, inject)
+
+    new_text, count = pattern.subn(repl, text, count=1)
+    return new_text, count > 0
+
+
+def _upgrade_injected_model(text: str, model: str) -> Tuple[str, bool]:
+    """Upgrade existing injection snippets (e.g. gpt-5.2-codex -> gpt-5.3-codex)."""
+
+    changed = False
+
+    # 仅升级“注入逻辑”里出现的目标模型，避免误伤其他位置。
+    pattern_find = re.compile(
+        r'(models\.find\(v=>v\.model===(["\"]))gpt-5\.2-codex(\2\)\|\|)'
+    )
+    text, n = pattern_find.subn(rf"\1{model}\3", text)
+    changed = changed or n > 0
+
+    pattern_unshift = re.compile(
+        r'(models\.unshift\(\{model:(["\"]))gpt-5\.2-codex(\2)'
+    )
+    text, n = pattern_unshift.subn(rf"\1{model}\3", text)
+    changed = changed or n > 0
+
+    return text, changed
 
 
 def remove_auth_only(text: str) -> Tuple[str, bool]:
@@ -190,8 +269,9 @@ def patch_file(path: Path, include_mini: bool = False) -> None:
     text, changed_chatgpt = ensure_chatgpt(text, include_mini=include_mini)
     text, changed_auth = remove_auth_only(text)
     text, changed_sets = replace_model_sets(text, include_mini=include_mini)
+    text, changed_list_models = ensure_model_in_list_models_response(text, "gpt-5.3-codex")
 
-    if changed_apikey or changed_chatgpt or changed_auth or changed_sets:
+    if changed_apikey or changed_chatgpt or changed_auth or changed_sets or changed_list_models:
         path.write_text(text)
         changes = []
         if changed_apikey:
@@ -202,6 +282,8 @@ def patch_file(path: Path, include_mini: bool = False) -> None:
             changes.append("auth_only")
         if changed_sets:
             changes.append("model_sets")
+        if changed_list_models:
+            changes.append("list_models")
         print(f"[patched] {path} ({', '.join(changes)})")
     else:
         print(f"[skip]    {path} (already compliant)")

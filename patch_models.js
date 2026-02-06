@@ -136,12 +136,15 @@ function replaceAuthMethodArray(text, field, newItems) {
   const newArray = `[${newItems.join(",")}]`;
   const newField = `${field}:${newArray}`;
 
-  const patternArray = new RegExp(`${field}:\\s*\\[[^\\]]*\\]`, "s");
+  // 兼容 key 被引号包裹：apikey:[] / "apikey":[] / 'apikey':[]
+  const patternArray = new RegExp(
+    `(?:${field}|\\"${field}\\"|'${field}'):\\s*\\[[^\\]]*\\]`
+  );
   if (patternArray.test(text)) {
     return [text.replace(patternArray, newField), true];
   }
 
-  const patternVar = new RegExp(`${field}:[A-Z][A-Z0-9_]*`);
+  const patternVar = new RegExp(`(?:${field}|\\"${field}\\"|'${field}'):[A-Z][A-Z0-9_]*`);
   if (patternVar.test(text)) {
     return [text.replace(patternVar, newField), true];
   }
@@ -162,12 +165,57 @@ function ensureChatgpt(text, includeMini) {
 function replaceModelSets(text, includeMini) {
   const newList = buildApikeyList(text, includeMini);
   const newArray = `[${newList.join(",")}]`;
-  const pattern = /new Set\(\["gpt-5[^\]]*\]\)/g;
+  // 旧实现要求 Set 的第一个元素必须是 "gpt-5..."。
+  // 新版本 bundle 里可能不是以 gpt-5 开头，且可能使用单引号。
+  const pattern = /new Set\(\[[^\]]*gpt-5[^\]]*\]\)/g;
   if (!pattern.test(text)) {
     return [text, false];
   }
   pattern.lastIndex = 0;
   return [text.replace(pattern, `new Set(${newArray})`), true];
+}
+
+function ensureModelInListModelsResponse(text, model) {
+  // Already injects.
+  if (text.includes(`v.model===\"${model}\"`) || text.includes(`v.model==\"${model}\"`)) {
+    return [text, false];
+  }
+
+  // Upgrade existing injection target.
+  if (text.includes('gpt-5.2-codex')) {
+    const upgraded = text
+      .replace(
+        /models\.find\(v=>v\.model===(["'])gpt-5\.2-codex\1\)\|\|/g,
+        `models.find(v=>v.model===$1${model}$1)||`
+      )
+      .replace(
+        /models\.unshift\(\{model:(["'])gpt-5\.2-codex\1/g,
+        `models.unshift({model:$1${model}$1`
+      );
+    if (upgraded !== text) {
+      return [upgraded, true];
+    }
+  }
+
+  const ident = "[_$A-Za-z][\\w$]*";
+  // Node 8 兼容：不用 named groups / dotAll flag
+  const pattern = new RegExp(
+    `(${ident})=\\{models:\\[\\]\\};let (${ident})=null;return (${ident})\\.forEach\\([\\s\\S]*?\\),\\{modelsByType:\\1,defaultModel:\\2\\}`
+  );
+
+  const match = pattern.exec(text);
+  if (!match) {
+    return [text, false];
+  }
+
+  const obj = match[1];
+  const defModel = match[2];
+  const tail = `),{modelsByType:${obj},defaultModel:${defModel}}`;
+  const replacement = match[0].replace(
+    tail,
+    `),${obj}.models.find(v=>v.model===\"${model}\")||${obj}.models.unshift({model:\"${model}\",supportedReasoningEfforts:[{reasoningEffort:\"xhigh\",description:\"xhigh effort\"}]}),{modelsByType:${obj},defaultModel:${defModel}}`
+  );
+  return [text.replace(match[0], replacement), true];
 }
 
 function removeAuthOnly(text) {
@@ -196,19 +244,28 @@ function patchFile(filePath, includeMini) {
   let changedChatgpt = false;
   let changedAuth = false;
   let changedSets = false;
+  let changedListModels = false;
 
   [text, changedApikey] = ensureApikey(text, includeMini);
   [text, changedChatgpt] = ensureChatgpt(text, includeMini);
   [text, changedAuth] = removeAuthOnly(text);
   [text, changedSets] = replaceModelSets(text, includeMini);
+  [text, changedListModels] = ensureModelInListModelsResponse(text, "gpt-5.3-codex");
 
-  if (changedApikey || changedChatgpt || changedAuth || changedSets) {
+  if (
+    changedApikey ||
+    changedChatgpt ||
+    changedAuth ||
+    changedSets ||
+    changedListModels
+  ) {
     fs.writeFileSync(filePath, text, "utf8");
     const changes = [];
     if (changedApikey) changes.push("apikey");
     if (changedChatgpt) changes.push("chatgpt");
     if (changedAuth) changes.push("auth_only");
     if (changedSets) changes.push("model_sets");
+    if (changedListModels) changes.push("list_models");
     console.log(`[patched] ${filePath} (${changes.join(", ")})`);
   } else {
     console.log(`[skip]    ${filePath} (already compliant)`);

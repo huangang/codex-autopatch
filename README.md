@@ -10,7 +10,14 @@ This repo provides Shell, Python, Node.js, and Go scripts to patch the VS Code C
 - Clears `CHAT_GPT_AUTH_ONLY_MODELS` so all models can be used via apikey
 - Creates `.bak` backups before patching
 
-## Supported Models
+## Supported Models (UI patch)
+
+This repo patches the Codex extension webview bundle to **show additional models in the UI**.
+
+Important:
+
+- If the Codex app-server / API you are connected to only supports up to `gpt-5.2-codex`, then `gpt-5.3-codex` may appear in the dropdown after patching, but **requests can still fail** (e.g. “model not found”).
+- This is an unofficial workaround (a hack). Extension updates may require re-patching.
 
 Default models included when no models are found in the target file:
 
@@ -19,6 +26,8 @@ Default models included when no models are found in the target file:
 - `gpt-5.1-codex-max`
 
 The scripts also automatically detect and include any `gpt-5*` models found in the webview bundle.
+
+Implementation note: some extension versions build the model picker from the `model/list` response. When needed, the scripts also inject `gpt-5.3-codex` into that response so it becomes selectable.
 
 ## Usage
 

@@ -200,10 +200,11 @@ sort_models() {
 
     # 版本排序（降序）
     local sorted_codex_max sorted_codex sorted_mini sorted_others
-    sorted_codex_max=$(printf '%s\n' "${codex_max[@]}" 2>/dev/null | sort -rV || true)
-    sorted_codex=$(printf '%s\n' "${codex[@]}" 2>/dev/null | sort -rV || true)
-    sorted_mini=$(printf '%s\n' "${mini[@]}" 2>/dev/null | sort -rV || true)
-    sorted_others=$(printf '%s\n' "${others[@]}" 2>/dev/null | sort -rV || true)
+    # bash + set -u: 空数组/未初始化数组在某些环境下可能触发 unbound variable
+    sorted_codex_max=$(printf '%s\n' "${codex_max[@]+"${codex_max[@]}"}" 2>/dev/null | sort -rV || true)
+    sorted_codex=$(printf '%s\n' "${codex[@]+"${codex[@]}"}" 2>/dev/null | sort -rV || true)
+    sorted_mini=$(printf '%s\n' "${mini[@]+"${mini[@]}"}" 2>/dev/null | sort -rV || true)
+    sorted_others=$(printf '%s\n' "${others[@]+"${others[@]}"}" 2>/dev/null | sort -rV || true)
 
     # 按优先级输出
     echo "$sorted_codex_max"
@@ -237,14 +238,14 @@ replace_auth_array() {
     local field="$2"
     local new_array="$3"
 
-    # 替换 field:[...] 形式（包括多行）
+    # 替换 field:[...] 形式（包括多行），兼容 key 被引号包裹：apikey / "apikey" / 'apikey'
     # 使用 perl 处理多行正则
     local result
-    result=$(echo "$content" | perl -0pe "s/${field}:\\s*\\[[^\\]]*\\]/${field}:${new_array}/s")
+    result=$(echo "$content" | perl -0pe "s/(?:${field}|\"${field}\"|'${field}'):\\s*\\[[^\\]]*\\]/${field}:${new_array}/s")
 
     # 如果没有变化，尝试替换变量引用形式 field:VARIABLE_NAME
     if [[ "$result" == "$content" ]]; then
-        result=$(echo "$content" | sed -E "s/${field}:[A-Z][A-Z0-9_]*/${field}:${new_array}/")
+        result=$(echo "$content" | sed -E "s/(^|[^A-Za-z0-9_])(${field}|\"${field}\"|'${field}'):[A-Z][A-Z0-9_]*/\1${field}:${new_array}/")
     fi
 
     echo "$result"
@@ -260,7 +261,52 @@ clear_auth_only() {
 replace_model_sets() {
     local content="$1"
     local new_array="$2"
-    echo "$content" | perl -pe "s/new Set\\(\\[\"gpt-5[^\\]]*\\]\\)/new Set(${new_array})/g"
+    # 新版本 bundle 里可能不是以 gpt-5 开头，且可能使用单引号
+    echo "$content" | perl -pe "s/new Set\\(\\[[^\\]]*gpt-5[^\\]]*\\]\\)/new Set(${new_array})/g"
+}
+
+# 确保 model/list 的结果里包含目标模型（部分版本下拉框依赖 model/list 返回）
+ensure_list_models_includes() {
+    local content="$1"
+    local model="$2"
+
+    # 避免对大 bundle 使用 `.*?` 跨全文的正则（可能出现灾难性回溯导致“卡住”）。
+    # 这里改为：用较小正则抓变量名 + 用 index/substr 定位尾部并注入，整体 O(n)。
+    echo "$content" | TARGET_MODEL="$model" perl -0777 -pe '
+        my $model = $ENV{TARGET_MODEL} // q{};
+        if ($model eq q{}) { next }
+
+        # 已经注入过就不再重复注入
+        if (index($_, qq(v.model==="$model")) >= 0) { next }
+
+        # 如果存在旧的注入目标，先升级（5.2 -> 5.3）
+        my $before = $_;
+        s/models\.find\(v=>v\.model===(["\x27])gpt-5\.2-codex\1\)\|\|/models.find(v=>v.model===$1${model}$1)||/g;
+        s/models\.unshift\(\{model:(["\x27])gpt-5\.2-codex\1/models.unshift({model:$1${model}$1/g;
+        if ($_ ne $before) { next }
+
+        # 抓到 transformer 里的变量名：X={models:[]};let Y=null;return Z.forEach(
+        if ( /([_A-Za-z][\w]*)=\{models:\[\]\};let ([_A-Za-z][\w]*)=null;return ([_A-Za-z][\w]*)\.forEach\(/g ) {
+            my ($obj,$def) = ($1,$2);
+            my $inject = ",$obj.models.find(v=>v.model===\"$model\")||" .
+                         "$obj.models.unshift({model:\"$model\",supportedReasoningEfforts:[{reasoningEffort:\"xhigh\",description:\"xhigh effort\"}]})";
+
+            # 兼容两种尾部形态："),{...}" 或 "}}),{...}"
+            my $tail1 = "),{modelsByType:$obj,defaultModel:$def}";
+            my $tail2 = "}}),{modelsByType:$obj,defaultModel:$def}";
+            my $search_from = pos($_) // 0;
+            my $pos = index($_, $tail1, $search_from);
+            my $tail = $tail1;
+            if ($pos < 0) {
+                $pos = index($_, $tail2, $search_from);
+                $tail = $tail2;
+            }
+
+            if ($pos >= 0) {
+                substr($_, $pos, 0) = $inject;
+            }
+        }
+    '
 }
 
 # Patch 单个文件
@@ -309,6 +355,9 @@ patch_file() {
 
     # 替换 new Set([...]) 格式
     new_content=$(replace_model_sets "$new_content" "$model_array")
+
+    # 确保 listModels 的返回包含 gpt-5.3-codex（否则下拉框可能不会显示）
+    new_content=$(ensure_list_models_includes "$new_content" "gpt-5.3-codex")
 
     # 检查是否有变化
     if [[ "$new_content" != "$content" ]]; then
