@@ -119,9 +119,9 @@ function buildApikeyList(text, includeMini) {
   const gpt5Models = findGpt5Models(text);
 
   let candidates = new Set([...gpt5Models, ...defaultOrder, ...codexVersions]);
-  if (candidates.size === 0) {
-    candidates = new Set(["gpt-5.1-codex-max"]);
-  }
+  candidates.add("gpt-5.3-codex");
+  candidates.add("gpt-5.2-codex");
+  candidates.add("gpt-5.1-codex-max");
 
   if (!includeMini) {
     candidates = new Set(

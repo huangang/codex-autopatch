@@ -10,6 +10,16 @@ This repo provides Shell, Python, Node.js, and Go scripts to patch the VS Code C
 - Clears `CHAT_GPT_AUTH_ONLY_MODELS` so all models can be used via apikey
 - Creates `.bak` backups before patching
 
+## Supported Models
+
+Default models included when no models are found in the target file:
+
+- `gpt-5.3-codex`
+- `gpt-5.2-codex`
+- `gpt-5.1-codex-max`
+
+The scripts also automatically detect and include any `gpt-5*` models found in the webview bundle.
+
 ## Usage
 
 ### Quick Start (no download required)

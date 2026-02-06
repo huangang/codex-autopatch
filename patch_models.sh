@@ -282,11 +282,7 @@ patch_file() {
     gpt5_models=$(find_gpt5_models "$content")
     codex_max_models=$(find_codex_max_versions "$content")
     all_models=$(printf '%s\n%s' "$gpt5_models" "$codex_max_models" | sort -u)
-
-    # 如果没有找到任何模型，使用默认值
-    if [[ -z "$all_models" ]]; then
-        all_models="gpt-5.1-codex-max"
-    fi
+    all_models=$(printf '%s\ngpt-5.3-codex\ngpt-5.2-codex\ngpt-5.1-codex-max' "$all_models" | sort -u)
 
     # 排序模型
     local sorted_models

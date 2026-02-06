@@ -202,9 +202,10 @@ func buildApikeyList(text string, includeMini bool) []string {
 	for _, item := range codexVersions {
 		candidates[item] = struct{}{}
 	}
-	if len(candidates) == 0 {
-		candidates["gpt-5.1-codex-max"] = struct{}{}
-	}
+	candidates["gpt-5.3-codex"] = struct{}{}
+	candidates["gpt-5.2-codex"] = struct{}{}
+	candidates["gpt-5.1-codex-max"] = struct{}{}
+
 	if !includeMini {
 		filtered := map[string]struct{}{}
 		for item := range candidates {

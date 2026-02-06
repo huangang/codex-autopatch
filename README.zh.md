@@ -10,6 +10,16 @@ English: [`README.md`](README.md) | 中文: [`README.zh.md`](README.zh.md)
 - 清空 `CHAT_GPT_AUTH_ONLY_MODELS`，确保 apikey 可用全部模型
 - patch 前自动生成 `.bak` 备份
 
+## 支持的模型
+
+当目标文件中未找到模型时，默认包含以下模型：
+
+- `gpt-5.3-codex`
+- `gpt-5.2-codex`
+- `gpt-5.1-codex-max`
+
+脚本还会自动检测并包含 webview bundle 中发现的任何 `gpt-5*` 模型。
+
 ## 用法
 
 ### 快速开始（无需下载）

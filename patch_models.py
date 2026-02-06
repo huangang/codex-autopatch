@@ -19,6 +19,7 @@
   python3 patch_models.py --restore
   python3 patch_models.py --restore /path/to/index-foo.js.bak ...
 """
+
 from __future__ import annotations
 
 import argparse
@@ -106,8 +107,7 @@ def build_apikey_list(text: str, include_mini: bool = False) -> List[str]:
     gpt5_models = find_gpt5_models(text)
 
     candidates = set(gpt5_models) | set(default_order) | set(codex_versions)
-    if not candidates:
-        candidates = {"gpt-5.1-codex-max"}
+    candidates.update({"gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max"})
 
     # 默认过滤掉 -mini 模型，除非显式指定 include_mini
     if not include_mini:
@@ -116,7 +116,9 @@ def build_apikey_list(text: str, include_mini: bool = False) -> List[str]:
     return order_models(candidates)
 
 
-def replace_auth_method_array(text: str, field: str, new_items: List[str]) -> Tuple[str, bool]:
+def replace_auth_method_array(
+    text: str, field: str, new_items: List[str]
+) -> Tuple[str, bool]:
     """Replace array content for a specific field in MODEL_ORDER_BY_AUTH_METHOD.
 
     Handles both single-line and multi-line array formats, including spread operators,
@@ -127,19 +129,14 @@ def replace_auth_method_array(text: str, field: str, new_items: List[str]) -> Tu
 
     # 匹配 field: [ ... ] 形式，可能跨多行，可能包含展开运算符 ...
     # 使用 re.DOTALL 让 . 匹配换行符
-    pattern_array = re.compile(
-        rf'{field}:\s*\[[^\]]*\]',
-        re.DOTALL
-    )
+    pattern_array = re.compile(rf"{field}:\s*\[[^\]]*\]", re.DOTALL)
 
     if pattern_array.search(text):
         return pattern_array.sub(new_field, text, count=1), True
 
     # 匹配 field:VARIABLE_NAME 形式（变量引用，如 apikey:DEFAULT_MODEL_ORDER）
     # 变量名由大写字母、数字和下划线组成
-    pattern_var = re.compile(
-        rf'{field}:[A-Z][A-Z0-9_]*'
-    )
+    pattern_var = re.compile(rf"{field}:[A-Z][A-Z0-9_]*")
 
     if pattern_var.search(text):
         return pattern_var.sub(new_field, text, count=1), True
@@ -201,7 +198,9 @@ def auto_discover() -> List[Path]:
     home = Path.home()
     roots = [home / ".vscode" / "extensions"]
     if os.name == "nt":
-        roots.append(Path(os.environ.get("USERPROFILE", home)) / ".vscode" / "extensions")
+        roots.append(
+            Path(os.environ.get("USERPROFILE", home)) / ".vscode" / "extensions"
+        )
 
     found: List[Path] = []
     for root in roots:
@@ -220,7 +219,9 @@ def auto_discover_baks() -> List[Path]:
     home = Path.home()
     roots = [home / ".vscode" / "extensions"]
     if os.name == "nt":
-        roots.append(Path(os.environ.get("USERPROFILE", home)) / ".vscode" / "extensions")
+        roots.append(
+            Path(os.environ.get("USERPROFILE", home)) / ".vscode" / "extensions"
+        )
 
     found: List[Path] = []
     for root in roots:
@@ -256,7 +257,11 @@ def main(argv: List[str]) -> int:
         description="Patch VS Code Codex webview bundles to expose latest+previous codex-max for apikey users."
     )
     parser.add_argument("files", nargs="*", help="index-*.js files to patch")
-    parser.add_argument("--auto", action="store_true", help="auto-discover index-*.js under default extension dirs")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="auto-discover index-*.js under default extension dirs",
+    )
     parser.add_argument(
         "--restore",
         action="store_true",
