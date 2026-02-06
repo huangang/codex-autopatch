@@ -256,6 +256,13 @@ clear_auth_only() {
     echo "$content" | sed -E 's/CHAT_GPT_AUTH_ONLY_MODELS=new Set\(\[[^]]*\]\)/CHAT_GPT_AUTH_ONLY_MODELS=new Set([])/g'
 }
 
+# 替换 new Set([...]) 格式的模型列表
+replace_model_sets() {
+    local content="$1"
+    local new_array="$2"
+    echo "$content" | perl -pe "s/new Set\\(\\[\"gpt-5[^\\]]*\\]\\)/new Set(${new_array})/g"
+}
+
 # Patch 单个文件
 patch_file() {
     local file="$1"
@@ -299,6 +306,9 @@ patch_file() {
 
     # 清空 AUTH_ONLY
     new_content=$(clear_auth_only "$new_content")
+
+    # 替换 new Set([...]) 格式
+    new_content=$(replace_model_sets "$new_content" "$model_array")
 
     # 检查是否有变化
     if [[ "$new_content" != "$content" ]]; then

@@ -156,6 +156,16 @@ def ensure_chatgpt(text: str, include_mini: bool = False) -> Tuple[str, bool]:
     return replace_auth_method_array(text, "chatgpt", new_list)
 
 
+def replace_model_sets(text: str, include_mini: bool = False) -> Tuple[str, bool]:
+    """Replace all new Set([...]) containing gpt-5 models with updated list."""
+    new_list = build_apikey_list(text, include_mini=include_mini)
+    new_array = "[" + ",".join(new_list) + "]"
+    pattern = re.compile(r'new Set\(\["gpt-5[^\]]*\]\)')
+    if not pattern.search(text):
+        return text, False
+    return pattern.sub(f"new Set({new_array})", text), True
+
+
 def remove_auth_only(text: str) -> Tuple[str, bool]:
     """Clear CHAT_GPT_AUTH_ONLY_MODELS entirely so all models work with apikey."""
     m = re.search(r"CHAT_GPT_AUTH_ONLY_MODELS=new Set\(\[([^\]]*?)\]\)", text)
@@ -179,8 +189,9 @@ def patch_file(path: Path, include_mini: bool = False) -> None:
     text, changed_apikey = ensure_apikey(original, include_mini=include_mini)
     text, changed_chatgpt = ensure_chatgpt(text, include_mini=include_mini)
     text, changed_auth = remove_auth_only(text)
+    text, changed_sets = replace_model_sets(text, include_mini=include_mini)
 
-    if changed_apikey or changed_chatgpt or changed_auth:
+    if changed_apikey or changed_chatgpt or changed_auth or changed_sets:
         path.write_text(text)
         changes = []
         if changed_apikey:
@@ -189,6 +200,8 @@ def patch_file(path: Path, include_mini: bool = False) -> None:
             changes.append("chatgpt")
         if changed_auth:
             changes.append("auth_only")
+        if changed_sets:
+            changes.append("model_sets")
         print(f"[patched] {path} ({', '.join(changes)})")
     else:
         print(f"[skip]    {path} (already compliant)")

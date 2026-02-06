@@ -250,6 +250,16 @@ func ensureChatgpt(text string, includeMini bool) (string, bool) {
 	return replaceAuthMethodArray(text, "chatgpt", newList)
 }
 
+func replaceModelSets(text string, includeMini bool) (string, bool) {
+	newList := buildApikeyList(text, includeMini)
+	newArray := "[" + strings.Join(newList, ",") + "]"
+	pattern := regexp.MustCompile(`new Set\(\["gpt-5[^\]]*\]\)`)
+	if !pattern.MatchString(text) {
+		return text, false
+	}
+	return pattern.ReplaceAllString(text, "new Set("+newArray+")"), true
+}
+
 func removeAuthOnly(text string) (string, bool) {
 	pattern := regexp.MustCompile(`CHAT_GPT_AUTH_ONLY_MODELS=new Set\(\[([^\]]*?)\]\)`)
 	match := pattern.FindStringSubmatchIndex(text)
@@ -280,12 +290,14 @@ func patchFile(filePath string, includeMini bool) {
 	changedApikey := false
 	changedChatgpt := false
 	changedAuth := false
+	changedSets := false
 
 	text, changedApikey = ensureApikey(text, includeMini)
 	text, changedChatgpt = ensureChatgpt(text, includeMini)
 	text, changedAuth = removeAuthOnly(text)
+	text, changedSets = replaceModelSets(text, includeMini)
 
-	if changedApikey || changedChatgpt || changedAuth {
+	if changedApikey || changedChatgpt || changedAuth || changedSets {
 		if err := os.WriteFile(filePath, []byte(text), 0o644); err != nil {
 			fmt.Printf("[error]   %s\n", err.Error())
 			return
@@ -299,6 +311,9 @@ func patchFile(filePath string, includeMini bool) {
 		}
 		if changedAuth {
 			changes = append(changes, "auth_only")
+		}
+		if changedSets {
+			changes = append(changes, "model_sets")
 		}
 		fmt.Printf("[patched] %s (%s)\n", filePath, strings.Join(changes, ", "))
 	} else {

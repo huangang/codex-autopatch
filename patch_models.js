@@ -159,6 +159,17 @@ function ensureChatgpt(text, includeMini) {
   return replaceAuthMethodArray(text, "chatgpt", newList);
 }
 
+function replaceModelSets(text, includeMini) {
+  const newList = buildApikeyList(text, includeMini);
+  const newArray = `[${newList.join(",")}]`;
+  const pattern = /new Set\(\["gpt-5[^\]]*\]\)/g;
+  if (!pattern.test(text)) {
+    return [text, false];
+  }
+  pattern.lastIndex = 0;
+  return [text.replace(pattern, `new Set(${newArray})`), true];
+}
+
 function removeAuthOnly(text) {
   const pattern = /CHAT_GPT_AUTH_ONLY_MODELS=new Set\(\[([^\]]*?)\]\)/;
   const match = pattern.exec(text);
@@ -184,17 +195,20 @@ function patchFile(filePath, includeMini) {
   let changedApikey = false;
   let changedChatgpt = false;
   let changedAuth = false;
+  let changedSets = false;
 
   [text, changedApikey] = ensureApikey(text, includeMini);
   [text, changedChatgpt] = ensureChatgpt(text, includeMini);
   [text, changedAuth] = removeAuthOnly(text);
+  [text, changedSets] = replaceModelSets(text, includeMini);
 
-  if (changedApikey || changedChatgpt || changedAuth) {
+  if (changedApikey || changedChatgpt || changedAuth || changedSets) {
     fs.writeFileSync(filePath, text, "utf8");
     const changes = [];
     if (changedApikey) changes.push("apikey");
     if (changedChatgpt) changes.push("chatgpt");
     if (changedAuth) changes.push("auth_only");
+    if (changedSets) changes.push("model_sets");
     console.log(`[patched] ${filePath} (${changes.join(", ")})`);
   } else {
     console.log(`[skip]    ${filePath} (already compliant)`);
